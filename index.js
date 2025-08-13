@@ -1,102 +1,72 @@
 const { addonBuilder } = require('stremio-addon-sdk');
-const axios = require('axios');
 
-const ADDON_ID = 'gay-torrents-addon';
-const ADDON_NAME = 'Gay Torrents';
-const ADDON_VERSION = '1.0.0'; // ✅ Semver correcto
-const BASE_URL = 'https://www.gay-torrents.net';
-const USERNAME = process.env.GAY_TORRENTS_USER; // tu usuario en Render
-const PASSWORD = process.env.GAY_TORRENTS_PASS; // tu contraseña en Render
+// Cache en memoria
+const cache = {
+  catalogs: {},
+  streams: {},
+};
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
-let sessionCookie = null;
-
-// Función de login / re-login
-async function login() {
-    const response = await axios.post(`${BASE_URL}/login`, {
-        username: USERNAME,
-        password: PASSWORD
-    });
-    if (response.headers['set-cookie']) {
-        sessionCookie = response.headers['set-cookie'].join('; ');
-        console.log('Login exitoso');
-    } else {
-        throw new Error('Login fallido');
-    }
+// Función para obtener datos con cache
+async function getCached(key, fetchFunc) {
+  const now = Date.now();
+  if (cache[key].data && (now - cache[key].timestamp < CACHE_TTL)) {
+    return cache[key].data;
+  }
+  const data = await fetchFunc();
+  cache[key] = { data, timestamp: now };
+  return data;
 }
 
-// Función para obtener torrents
-async function fetchTorrents(page = 1) {
-    if (!sessionCookie) await login();
-    try {
-        const res = await axios.get(`${BASE_URL}/torrents?page=${page}`, {
-            headers: { Cookie: sessionCookie }
-        });
-        // Aquí deberías parsear res.data según la estructura de la web
-        // Esto es un ejemplo genérico
-        return res.data.torrents || [];
-    } catch (err) {
-        console.log('Error al obtener torrents, reintentando login...');
-        await login();
-        return fetchTorrents(page);
-    }
+// Ejemplo de función que obtiene catálogo (modifica según tu fuente real)
+async function fetchCatalog() {
+  // Aquí va tu lógica real de catálogo
+  return [
+    { id: 'movies', type: 'movie', name: 'Películas Populares' }
+  ];
 }
 
-// Construimos el addon
-const builder = new addonBuilder({
-    id: ADDON_ID,
-    name: ADDON_NAME,
-    version: ADDON_VERSION,
-    description: 'Torrents para Stremio desde www.gay-torrents.net',
-    resources: ['catalog', 'meta', 'stream'],
-    types: ['movie', 'series'],
+// Ejemplo de función que obtiene streams (modifica según tu fuente real)
+async function fetchStreams({ type, id }) {
+  // Aquí va tu lógica real de streams
+  return [
+    { title: 'Ejemplo Stream', url: 'https://url-a-tu-video.com/stream.mp4', subtitles: [] }
+  ];
+}
+
+// Creamos el addon una sola vez
+const manifest = {
+  id: 'miaddongay',
+  version: '1.0.0',
+  name: 'Mi Addon Gay',
+  description: 'Addon rápido y optimizado',
+  resources: ['catalog', 'stream'],
+  types: ['movie', 'series'],
+  catalogs: await fetchCatalog(), // inicializamos al inicio
+};
+
+const builder = new addonBuilder(manifest);
+
+// Definimos handler para catálogo
+builder.defineCatalogHandler(async (args) => {
+  return { metas: await getCached('catalogs', fetchCatalog) };
 });
 
-// Catalog
-builder.defineCatalogHandler(async ({ type, id }) => {
-    let allTorrents = [];
-    for (let page = 1; page <= 10; page++) {
-        const torrents = await fetchTorrents(page);
-        allTorrents = allTorrents.concat(torrents);
-    }
-    // Ordenamos por fecha descendente
-    allTorrents.sort((a, b) => new Date(b.date) - new Date(a.date));
-    // Retornamos en el formato Stremio
-    return { metas: allTorrents.map(t => ({
-        id: t.id,
-        name: t.title,
-        type: type,
-        description: t.description,
-        genres: t.genres,
-        releaseInfo: t.release,
-        poster: t.poster
-    }))};
+// Definimos handler para streams
+builder.defineStreamHandler(async (args) => {
+  return { streams: await getCached(`streams_${args.id}`, () => fetchStreams(args)) };
 });
 
-// Meta handler
-builder.defineMetaHandler(async ({ type, id }) => {
-    // Buscar el torrent exacto
-    for (let page = 1; page <= 10; page++) {
-        const torrents = await fetchTorrents(page);
-        const torrent = torrents.find(t => t.id === id);
-        if (torrent) {
-            return {
-                id: torrent.id,
-                name: torrent.title,
-                type: type,
-                description: torrent.description,
-                genres: torrent.genres,
-                releaseInfo: torrent.release,
-                poster: torrent.poster,
-                streams: torrent.files.map(f => ({
-                    title: f.name,
-                    url: f.magnet,
-                    infoHash: f.infoHash
-                }))
-            };
-        }
-    }
-    return null;
-});
-
-// Exponemos el addon
+// Exportamos el addon
 module.exports = builder.getInterface();
+
+// Para ejecutar directamente con node
+if (require.main === module) {
+  const addon = builder.getInterface();
+  const express = require('express');
+  const app = express();
+  app.use('/manifest.json', (req, res) => res.json(addon.manifest));
+  app.use('/addon', (req, res) => addon.middleware(req, res));
+  const port = process.env.PORT || 7000;
+  app.listen(port, () => console.log(`Addon escuchando en http://localhost:${port}`));
+}
