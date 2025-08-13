@@ -1,129 +1,104 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const cheerio = require('cheerio');
-const StremioAddonSDK = require('stremio-addon-sdk');
+const { addonBuilder } = require('stremio-addon-sdk');
 
 const app = express();
-const PORT = process.env.PORT || 10000;
 
-// Variables de entorno para login
-const USERNAME = process.env.GAYTORRENTS_USER;
-const PASSWORD = process.env.GAYTORRENTS_PASS;
+// --- CONFIGURA AQUÍ TU LOGIN ---
+const LOGIN_URL = 'https://www.gay-torrents.net/login';
+const USERNAME = process.env.GT_USERNAME;
+const PASSWORD = process.env.GT_PASSWORD;
 
-let sessionCookie = null;
+// --- Variables de sesión ---
+let cookies = '';
+let lastLogin = 0;
 
-// Función para login
+// --- Función de login ---
 async function login() {
-    const loginRes = await fetch('https://www.gay-torrents.net/login', {
+    const res = await fetch(LOGIN_URL, {
         method: 'POST',
-        body: `username=${USERNAME}&password=${PASSWORD}`,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username: USERNAME, password: PASSWORD }),
+        redirect: 'manual'
     });
-    const cookies = loginRes.headers.get('set-cookie');
-    sessionCookie = cookies;
-    console.log('Login exitoso');
+
+    cookies = res.headers.get('set-cookie') || '';
+    lastLogin = Date.now();
+    console.log('✅ Login completado');
 }
 
-// Función para comprobar si la sesión expira y re-login
+// --- Función para comprobar sesión ---
 async function ensureLogin() {
-    if (!sessionCookie) {
+    if (!cookies || (Date.now() - lastLogin > 1000 * 60 * 30)) {
         await login();
     }
 }
 
-// Función para obtener torrents de una página
-async function fetchPage(url) {
+// --- Función para obtener torrents ---
+async function getTorrents(page = 1) {
     await ensureLogin();
-    const res = await fetch(url, { headers: { Cookie: sessionCookie } });
+    const url = `https://www.gay-torrents.net/page/${page}`;
+    const res = await fetch(url, { headers: { Cookie: cookies } });
     const html = await res.text();
     const $ = cheerio.load(html);
+
     const torrents = [];
-    $('.torrent_row').each((i, el) => {
-        const title = $(el).find('.torrent_name').text().trim();
-        const link = $(el).find('.torrent_name a').attr('href');
-        const date = $(el).find('.torrent_date').text().trim();
-        const poster = $(el).find('.torrent_poster img').attr('src');
-        const description = $(el).find('.torrent_description').text().trim();
-        torrents.push({ title, link, date, poster, description });
+    $('div.torrent-row').each((i, el) => {
+        const title = $(el).find('.torrent-title').text().trim();
+        const torrentUrl = $(el).find('.download a').attr('href');
+        const detailsUrl = $(el).find('.torrent-title a').attr('href');
+
+        if (title && torrentUrl) {
+            torrents.push({
+                name: title,
+                torrent: torrentUrl,
+                infoHash: Buffer.from(detailsUrl).toString('hex'),
+                type: 'movie'
+            });
+        }
     });
+
     return torrents;
 }
 
-// Función para obtener varios catálogos
-async function fetchCatalog(type) {
-    let results = [];
-    for (let i = 1; i <= 10; i++) { // 10 páginas
-        const pageTorrents = await fetchPage(`https://www.gay-torrents.net/${type}?page=${i}`);
-        results = results.concat(pageTorrents);
-    }
-    return results;
-}
-
-// Crear addon Stremio
-const builder = new StremioAddonSDK.AddonBuilder({
+// --- CONFIGURACIÓN DEL ADDON ---
+const builder = new addonBuilder({
     id: 'gay-torrents-addon',
     name: 'Gay Torrents',
     description: 'Torrents para Stremio desde www.gay-torrents.net',
     resources: ['catalog', 'meta', 'stream'],
-    types: ['movie', 'series']
+    types: ['movie']
 });
 
-// Catálogo para Películas
+// --- CATALOG ---
 builder.defineCatalogHandler(async (args) => {
-    if (args.type === 'movie') {
-        const movies = await fetchCatalog('movies');
-        return { metas: movies.map(m => ({
-            id: m.link,
-            type: 'movie',
-            name: m.title,
-            poster: m.poster,
-            description: m.description,
-            releaseInfo: m.date
-        })) };
+    const page = args.extra && args.extra.page ? args.extra.page : 1;
+    const torrents = [];
+
+    for (let p = page; p < page + 10; p++) {
+        const t = await getTorrents(p);
+        torrents.push(...t);
     }
+
+    return {
+        metas: torrents,
+        cacheMaxAge: 3600
+    };
 });
 
-// Catálogo para Series
-builder.defineCatalogHandler(async (args) => {
-    if (args.type === 'series') {
-        const series = await fetchCatalog('series');
-        return { metas: series.map(s => ({
-            id: s.link,
-            type: 'series',
-            name: s.title,
-            poster: s.poster,
-            description: s.description,
-            releaseInfo: s.date
-        })) };
+// --- STREAMS ---
+builder.defineStreamHandler(async (args) => {
+    const torrents = await getTorrents(1); // buscar en la primera página
+    const stream = torrents.find(t => t.infoHash === args.id);
+    if (stream) {
+        return [{ title: stream.name, url: stream.torrent, infoHash: stream.infoHash }];
     }
+    return [];
 });
 
-// Catálogo para Packs/Otros
-builder.defineCatalogHandler(async (args) => {
-    if (args.type === 'other') {
-        const packs = await fetchCatalog('packs');
-        return { metas: packs.map(p => ({
-            id: p.link,
-            type: 'other',
-            name: p.title,
-            poster: p.poster,
-            description: p.description,
-            releaseInfo: p.date
-        })) };
-    }
-});
+// --- EXPRESS ---
+app.use('/manifest.json', (req, res) => res.json(builder.getManifest()));
+app.use(builder.getRouter());
 
-// Servidor Express para Render
-app.get('/', (req, res) => res.send('Servidor del addon escuchando en el puerto ' + PORT));
-app.get('/manifest.json', (req, res) => res.json(builder.getManifest()));
-app.get('/stream/:id', async (req, res) => {
-    // Aquí podrías añadir streams reales si quieres que Stremio los reproduzca
-    res.json([]);
-});
-app.get('/meta/:type/:id', async (req, res) => {
-    // Podrías cargar datos específicos si quieres detalles
-    res.json({});
-});
-
-// Mantener servidor activo
-app.listen(PORT, () => console.log(`Servidor del addon escuchando en el puerto ${PORT}`));
+const PORT = process.env.PORT || 7000;
+app.listen(PORT, () => console.log(`🚀 Addon corriendo en puerto ${PORT}`));
