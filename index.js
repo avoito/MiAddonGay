@@ -1,73 +1,35 @@
-const { addonBuilder } = require("stremio-addon-sdk");
-const fetch = require("node-fetch");
+const { addonBuilder } = require('stremio-addon-sdk');
 
-const addon = new addonBuilder({
-    id: "org.tusaddons.torrents",
-    version: "1.0.0",
-    name: "Torrents Mejorado",
-    description: "Addon Stremio con cache y prefetch de torrents"
-});
-
-// Cache en memoria (puedes reemplazar con archivo JSON si quieres persistencia)
-let cache = {
-    movies: {}, // { imdbId: [ { title, magnet, seeds, size }, ... ] }
+// Manifest del addon
+const manifest = {
+    id: 'org.example.myaddon',
+    version: '1.0.0',
+    name: 'Mi Addon',
+    description: 'Addon de ejemplo para Stremio',
+    resources: ['catalog', 'stream'], // ✅ Ahora es un array
+    types: ['movie', 'series'],       // ✅ También array
+    idPrefixes: ['tt'],               // ✅ Si usas, debe ser array
+    catalogs: [
+        {
+            type: 'movie',
+            id: 'top_movies',
+            name: 'Top Movies'
+        }
+    ]
 };
-const MAX_CACHE = 50;
 
-// Función para mantener la cache corta
-function updateCache(imdbId, torrents) {
-    cache.movies[imdbId] = torrents.slice(0, 10); // guardamos los 10 mejores
-    // Limitar tamaño total
-    const keys = Object.keys(cache.movies);
-    if(keys.length > MAX_CACHE){
-        delete cache.movies[keys[0]];
-    }
-}
+// Creamos el addon
+const builder = new addonBuilder(manifest);
 
-// Función para obtener torrents (simulada, reemplaza con tu scraper actual)
-async function fetchTorrents(imdbId) {
-    // Si está en cache, devolvemos inmediatamente
-    if(cache.movies[imdbId]){
-        return cache.movies[imdbId];
-    }
-
-    // Ejemplo: fetch de API o scraping
-    const response = await fetch(`https://api.example.com/torrents/${imdbId}`);
-    const data = await response.json();
-
-    // Pre-fetch magnets (solo primeros 5 para no saturar)
-    const topTorrents = data.slice(0,5).map(t => ({
-        title: t.title,
-        magnet: t.magnet,
-        seeds: t.seeds,
-        size: t.size
-    }));
-
-    // Guardar en cache
-    updateCache(imdbId, topTorrents);
-
-    return topTorrents;
-}
-
-// Stream handler
-addon.defineStreamHandler(async (args) => {
-    const imdbId = args.id.replace("tt", ""); // ejemplo de conversión
-    const torrents = await fetchTorrents(imdbId);
-
-    // Convertimos a formato Stremio
-    return torrents.map(t => ({
-        title: t.title,
-        infoHash: t.magnet.match(/urn:btih:([a-zA-Z0-9]+)/)[1],
-        type: "torrent",
-        magnet: t.magnet,
-        seeds: t.seeds,
-        size: t.size
-    }));
+// Ejemplo de manejo de catálogo
+builder.defineCatalogHandler(args => {
+    return Promise.resolve({ metas: [] }); // Aquí devuelves tus películas/series
 });
 
-// Manifest (catálogo simplificado)
-addon.defineCatalogHandler(async (args) => {
-    return { metas: [] }; // opcional, puedes agregar catálogo
+// Ejemplo de manejo de stream
+builder.defineStreamHandler(args => {
+    return Promise.resolve({ streams: [] }); // Aquí devuelves tus links de streaming
 });
 
-module.exports = addon.getInterface();
+// Iniciamos el servidor
+module.exports = builder.getInterface();
