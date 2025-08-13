@@ -1,85 +1,45 @@
-const { addonBuilder } = require("stremio-addon-sdk");
-const axios = require("axios");
+const axios = require('axios');
+const { addonBuilder } = require('stremio-addon-sdk');
 
-const manifest = {
-    id: "org.gay.torrents.addon",
-    version: "1.0.0",
-    name: "Gay Torrents",
-    description: "Addon para ver contenido desde gay-torrents.net",
-    resources: ["catalog", "meta", "stream"],
-    types: ["movie"],
-    catalogs: [
-        {
-            type: "movie",
-            id: "gay_torrents_catalog",
-            name: "Gay Torrents"
-        }
-    ]
-};
+// Depuración: ver si las variables llegan desde Render
+console.log("Usuario (Render):", process.env.GAY_TORRENTS_USER);
+console.log("Contraseña (Render):", process.env.GAY_TORRENTS_PASS);
 
-// Cargamos usuario y contraseña desde variables de entorno (Render)
-const USERNAME = process.env.GAY_TORRENTS_USER;
-const PASSWORD = process.env.GAY_TORRENTS_PASS;
-
-if (!USERNAME || !PASSWORD) {
+// Verificar variables
+if (!process.env.GAY_TORRENTS_USER || !process.env.GAY_TORRENTS_PASS) {
     console.error("ERROR: No se han configurado GAY_TORRENTS_USER y/o GAY_TORRENTS_PASS en las variables de entorno.");
     process.exit(1);
 }
 
-const builder = new addonBuilder(manifest);
+const GAY_TORRENTS_USER = process.env.GAY_TORRENTS_USER;
+const GAY_TORRENTS_PASS = process.env.GAY_TORRENTS_PASS;
 
-// Catálogo
-builder.defineCatalogHandler(async (args) => {
-    try {
-        // Ejemplo: petición para loguearse en gay-torrents.net
-        await axios.post("https://www.gay-torrents.net/login.php", {
-            username: USERNAME,
-            password: PASSWORD
-        });
-
-        // Aquí iría la lógica real para scrapear o leer torrents
-        // Ejemplo de respuesta estática para pruebas:
-        return Promise.resolve({
-            metas: [
-                {
-                    id: "pelicula1",
-                    type: "movie",
-                    name: "Ejemplo Película",
-                    poster: "https://via.placeholder.com/150",
-                    description: "Descripción de prueba"
-                }
-            ]
-        });
-
-    } catch (err) {
-        console.error("Error en defineCatalogHandler:", err);
-        return Promise.resolve({ metas: [] });
-    }
+const builder = new addonBuilder({
+    id: "org.gaytorrents.addon",
+    version: "1.0.0",
+    name: "Gay Torrents Private Addon",
+    description: "Addon privado para acceder a Gay Torrents con usuario y contraseña",
+    resources: ["catalog", "stream"],
+    types: ["movie", "series"],
+    idPrefixes: ["gt_"]
 });
 
-// Metadata
-builder.defineMetaHandler(async (args) => {
-    return Promise.resolve({
-        meta: {
-            id: args.id,
-            type: "movie",
-            name: "Ejemplo Película",
-            poster: "https://via.placeholder.com/150",
-            description: "Descripción de prueba"
-        }
-    });
+builder.defineCatalogHandler(({ type, id }) => {
+    console.log(`Solicitando catálogo: ${type}, id: ${id}`);
+    // Aquí deberías poner tu lógica para obtener el catálogo desde Gay Torrents
+    return Promise.resolve({ metas: [] });
 });
 
-// Streams
-builder.defineStreamHandler(async (args) => {
-    return Promise.resolve({
-        streams: [
-            {
-                title: "Torrent Ejemplo",
-                infoHash: "1234567890abcdef1234567890abcdef12345678"
-            }
-        ]
-    });
+builder.defineStreamHandler(({ type, id }) => {
+    console.log(`Solicitando stream para: ${id}`);
+    // Aquí deberías poner la lógica para obtener el torrent desde Gay Torrents
+    return Promise.resolve({ streams: [] });
 });
 
-module.exports = builder.getInterface();
+const addonInterface = builder.getInterface();
+require("http").createServer((req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    addonInterface(req, res);
+}).listen(process.env.PORT || 7000, () => {
+    console.log("Addon iniciado en puerto " + (process.env.PORT || 7000));
+});
