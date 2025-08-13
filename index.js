@@ -1,4 +1,5 @@
 const { addonBuilder } = require("stremio-addon-sdk");
+const axios = require("axios");
 
 const manifest = {
     id: "org.gay.torrents.addon",
@@ -16,81 +17,69 @@ const manifest = {
     ]
 };
 
+// Cargamos usuario y contraseña desde variables de entorno (Render)
+const USERNAME = process.env.GAY_TORRENTS_USER;
+const PASSWORD = process.env.GAY_TORRENTS_PASS;
+
+if (!USERNAME || !PASSWORD) {
+    console.error("ERROR: No se han configurado GAY_TORRENTS_USER y/o GAY_TORRENTS_PASS en las variables de entorno.");
+    process.exit(1);
+}
+
 const builder = new addonBuilder(manifest);
 
-// Handler para catálogo
-builder.defineCatalogHandler(args => {
-    console.log("Catalog request:", args);
+// Catálogo
+builder.defineCatalogHandler(async (args) => {
+    try {
+        // Ejemplo: petición para loguearse en gay-torrents.net
+        await axios.post("https://www.gay-torrents.net/login.php", {
+            username: USERNAME,
+            password: PASSWORD
+        });
 
-    return Promise.resolve({
-        metas: [
-            {
-                id: "gay_movie_1",
-                type: "movie",
-                name: "Gay Movie Ejemplo",
-                poster: "https://via.placeholder.com/150x220.png?text=Gay+Movie",
-                description: "Película de ejemplo del addon gay-torrents.net",
-                releaseInfo: "2025"
-            },
-            {
-                id: "gay_movie_2",
-                type: "movie",
-                name: "Otro Ejemplo",
-                poster: "https://via.placeholder.com/150x220.png?text=Otro+Ejemplo",
-                description: "Segunda película de ejemplo",
-                releaseInfo: "2024"
-            }
-        ]
-    });
+        // Aquí iría la lógica real para scrapear o leer torrents
+        // Ejemplo de respuesta estática para pruebas:
+        return Promise.resolve({
+            metas: [
+                {
+                    id: "pelicula1",
+                    type: "movie",
+                    name: "Ejemplo Película",
+                    poster: "https://via.placeholder.com/150",
+                    description: "Descripción de prueba"
+                }
+            ]
+        });
+
+    } catch (err) {
+        console.error("Error en defineCatalogHandler:", err);
+        return Promise.resolve({ metas: [] });
+    }
 });
 
-// Handler para metadatos
-builder.defineMetaHandler(args => {
-    console.log("Meta request:", args);
-
+// Metadata
+builder.defineMetaHandler(async (args) => {
     return Promise.resolve({
         meta: {
             id: args.id,
             type: "movie",
-            name: "Película de ejemplo",
-            poster: "https://via.placeholder.com/150x220.png?text=Meta+Poster",
-            background: "https://via.placeholder.com/600x400.png?text=Fondo",
-            description: "Descripción detallada de la película.",
-            releaseInfo: "2025"
+            name: "Ejemplo Película",
+            poster: "https://via.placeholder.com/150",
+            description: "Descripción de prueba"
         }
     });
 });
 
-// Handler para streams
-builder.defineStreamHandler(args => {
-    console.log("Stream request:", args);
-
+// Streams
+builder.defineStreamHandler(async (args) => {
     return Promise.resolve({
         streams: [
             {
-                title: "Torrent desde gay-torrents.net",
+                title: "Torrent Ejemplo",
                 infoHash: "1234567890abcdef1234567890abcdef12345678"
             }
         ]
     });
 });
 
-const express = require("express");
-const app = express();
-
-// Rutas sin "?"
-app.get("/:resource/:type/:id.json", (req, res) => {
-    builder.getInterface().get(req, res);
-});
-
-app.get("/:resource/:type/:id/:extra.json", (req, res) => {
-    builder.getInterface().get(req, res);
-});
-
-app.get("/manifest.json", (req, res) => {
-    res.send(manifest);
-});
-
-app.listen(7000, () => {
-    console.log("Addon funcionando en http://127.0.0.1:7000/manifest.json");
-});
+module.exports = builder.getInterface();
