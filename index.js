@@ -1,72 +1,78 @@
+const express = require('express');
 const { addonBuilder } = require('stremio-addon-sdk');
 
-// Cache en memoria
-const cache = {
-  catalogs: {},
-  streams: {},
-};
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+const app = express();
+const PORT = process.env.PORT || 7000;
 
-// Función para obtener datos con cache
-async function getCached(key, fetchFunc) {
+// Cache simple en memoria
+const cache = {};
+
+async function getCached(key, fetchFn, ttl = 3600) {
   const now = Date.now();
-  if (cache[key].data && (now - cache[key].timestamp < CACHE_TTL)) {
+  if (cache[key] && (now - cache[key].timestamp < ttl * 1000)) {
     return cache[key].data;
   }
-  const data = await fetchFunc();
+  const data = await fetchFn();
   cache[key] = { data, timestamp: now };
   return data;
 }
 
-// Ejemplo de función que obtiene catálogo (modifica según tu fuente real)
+// Tu función para obtener el catálogo
 async function fetchCatalog() {
-  // Aquí va tu lógica real de catálogo
+  // Aquí tu lógica real para obtener el catálogo
   return [
-    { id: 'movies', type: 'movie', name: 'Películas Populares' }
+    {
+      id: 'movie_example',
+      type: 'movie',
+      name: 'Película de prueba',
+      poster: 'https://via.placeholder.com/300x450',
+      description: 'Descripción de ejemplo',
+    },
   ];
 }
 
-// Ejemplo de función que obtiene streams (modifica según tu fuente real)
-async function fetchStreams({ type, id }) {
-  // Aquí va tu lógica real de streams
+// Tu función para obtener streams de un contenido
+async function fetchStreams(args) {
+  // Aquí tu lógica real para streams
   return [
-    { title: 'Ejemplo Stream', url: 'https://url-a-tu-video.com/stream.mp4', subtitles: [] }
+    {
+      title: 'Stream de prueba',
+      url: 'https://example.com/video.mp4',
+      subtitles: [],
+    },
   ];
 }
 
-// Creamos el addon una sola vez
-const manifest = {
-  id: 'miaddongay',
-  version: '1.0.0',
-  name: 'Mi Addon Gay',
-  description: 'Addon rápido y optimizado',
-  resources: ['catalog', 'stream'],
-  types: ['movie', 'series'],
-  catalogs: await fetchCatalog(), // inicializamos al inicio
-};
+async function startAddon() {
+  const manifest = {
+    id: 'miaddongay',
+    version: '1.0.0',
+    name: 'Mi Addon Gay',
+    description: 'Addon rápido y optimizado',
+    resources: ['catalog', 'stream'],
+    types: ['movie', 'series'],
+    catalogs: await fetchCatalog(),
+  };
 
-const builder = new addonBuilder(manifest);
+  const builder = new addonBuilder(manifest);
 
-// Definimos handler para catálogo
-builder.defineCatalogHandler(async (args) => {
-  return { metas: await getCached('catalogs', fetchCatalog) };
-});
+  builder.defineCatalogHandler(async (args) => {
+    const metas = await getCached('catalogs', fetchCatalog);
+    return { metas };
+  });
 
-// Definimos handler para streams
-builder.defineStreamHandler(async (args) => {
-  return { streams: await getCached(`streams_${args.id}`, () => fetchStreams(args)) };
-});
+  builder.defineStreamHandler(async (args) => {
+    const streams = await getCached(`streams_${args.id}`, () => fetchStreams(args));
+    return { streams };
+  });
 
-// Exportamos el addon
-module.exports = builder.getInterface();
-
-// Para ejecutar directamente con node
-if (require.main === module) {
   const addon = builder.getInterface();
-  const express = require('express');
-  const app = express();
-  app.use('/manifest.json', (req, res) => res.json(addon.manifest));
+
+  app.get('/manifest.json', (req, res) => res.json(addon.manifest));
   app.use('/addon', (req, res) => addon.middleware(req, res));
-  const port = process.env.PORT || 7000;
-  app.listen(port, () => console.log(`Addon escuchando en http://localhost:${port}`));
+
+  app.listen(PORT, () => console.log(`Addon escuchando en http://localhost:${PORT}`));
 }
+
+// Arrancamos el addon
+startAddon().catch(err => console.error('Error iniciando addon:', err));
