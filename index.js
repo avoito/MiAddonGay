@@ -1,18 +1,18 @@
-const { addonBuilder } = require("stremio-addon-sdk");
+const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 
-// Leer variables de entorno
+// Variables desde Render
 const USER = process.env.GAY_TORRENTS_USER;
 const PASS = process.env.GAY_TORRENTS_PASS;
 
 if (!USER || !PASS) {
-    console.error("ERROR: No se han configurado GAY_TORRENTS_USER y/o GAY_TORRENTS_PASS en las variables de entorno.");
+    console.error("ERROR: Faltan GAY_TORRENTS_USER o GAY_TORRENTS_PASS en las variables de entorno.");
     process.exit(1);
 }
 
 console.log("Usuario (Render):", USER);
 console.log("Contraseña (Render):", PASS);
 
-// Crear manifest
+// Manifest
 const manifest = {
     id: "org.gaytorrents.addon",
     version: "1.0.0",
@@ -32,7 +32,7 @@ const manifest = {
 // Crear addon
 const builder = new addonBuilder(manifest);
 
-// Catálogo básico de prueba
+// Catálogo de prueba
 builder.defineCatalogHandler(() => {
     return Promise.resolve({
         metas: [
@@ -58,11 +58,7 @@ builder.defineStreamHandler(() => {
     });
 });
 
-// Servidor HTTP para mantenerlo activo en Render
-require("http")
-    .createServer((req, res) => {
-        builder.getInterface()(req, res);
-    })
-    .listen(process.env.PORT || 7000);
+// Servir el addon
+serveHTTP(builder.getInterface(), { port: process.env.PORT || 7000 });
 
 console.log(`Servidor del addon escuchando en el puerto ${process.env.PORT || 7000}`);
