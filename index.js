@@ -1,104 +1,102 @@
-const express = require('express');
-const fetch = require('node-fetch');
-const cheerio = require('cheerio');
 const { addonBuilder } = require('stremio-addon-sdk');
+const axios = require('axios');
 
-const app = express();
+const ADDON_ID = 'gay-torrents-addon';
+const ADDON_NAME = 'Gay Torrents';
+const ADDON_VERSION = '1.0.0'; // ✅ Semver correcto
+const BASE_URL = 'https://www.gay-torrents.net';
+const USERNAME = process.env.GAY_TORRENTS_USER; // tu usuario en Render
+const PASSWORD = process.env.GAY_TORRENTS_PASS; // tu contraseña en Render
 
-// --- CONFIGURA AQUÍ TU LOGIN ---
-const LOGIN_URL = 'https://www.gay-torrents.net/login';
-const USERNAME = process.env.GT_USERNAME;
-const PASSWORD = process.env.GT_PASSWORD;
+let sessionCookie = null;
 
-// --- Variables de sesión ---
-let cookies = '';
-let lastLogin = 0;
-
-// --- Función de login ---
+// Función de login / re-login
 async function login() {
-    const res = await fetch(LOGIN_URL, {
-        method: 'POST',
-        body: new URLSearchParams({ username: USERNAME, password: PASSWORD }),
-        redirect: 'manual'
+    const response = await axios.post(`${BASE_URL}/login`, {
+        username: USERNAME,
+        password: PASSWORD
     });
-
-    cookies = res.headers.get('set-cookie') || '';
-    lastLogin = Date.now();
-    console.log('✅ Login completado');
-}
-
-// --- Función para comprobar sesión ---
-async function ensureLogin() {
-    if (!cookies || (Date.now() - lastLogin > 1000 * 60 * 30)) {
-        await login();
+    if (response.headers['set-cookie']) {
+        sessionCookie = response.headers['set-cookie'].join('; ');
+        console.log('Login exitoso');
+    } else {
+        throw new Error('Login fallido');
     }
 }
 
-// --- Función para obtener torrents ---
-async function getTorrents(page = 1) {
-    await ensureLogin();
-    const url = `https://www.gay-torrents.net/page/${page}`;
-    const res = await fetch(url, { headers: { Cookie: cookies } });
-    const html = await res.text();
-    const $ = cheerio.load(html);
-
-    const torrents = [];
-    $('div.torrent-row').each((i, el) => {
-        const title = $(el).find('.torrent-title').text().trim();
-        const torrentUrl = $(el).find('.download a').attr('href');
-        const detailsUrl = $(el).find('.torrent-title a').attr('href');
-
-        if (title && torrentUrl) {
-            torrents.push({
-                name: title,
-                torrent: torrentUrl,
-                infoHash: Buffer.from(detailsUrl).toString('hex'),
-                type: 'movie'
-            });
-        }
-    });
-
-    return torrents;
+// Función para obtener torrents
+async function fetchTorrents(page = 1) {
+    if (!sessionCookie) await login();
+    try {
+        const res = await axios.get(`${BASE_URL}/torrents?page=${page}`, {
+            headers: { Cookie: sessionCookie }
+        });
+        // Aquí deberías parsear res.data según la estructura de la web
+        // Esto es un ejemplo genérico
+        return res.data.torrents || [];
+    } catch (err) {
+        console.log('Error al obtener torrents, reintentando login...');
+        await login();
+        return fetchTorrents(page);
+    }
 }
 
-// --- CONFIGURACIÓN DEL ADDON ---
+// Construimos el addon
 const builder = new addonBuilder({
-    id: 'gay-torrents-addon',
-    name: 'Gay Torrents',
+    id: ADDON_ID,
+    name: ADDON_NAME,
+    version: ADDON_VERSION,
     description: 'Torrents para Stremio desde www.gay-torrents.net',
     resources: ['catalog', 'meta', 'stream'],
-    types: ['movie']
+    types: ['movie', 'series'],
 });
 
-// --- CATALOG ---
-builder.defineCatalogHandler(async (args) => {
-    const page = args.extra && args.extra.page ? args.extra.page : 1;
-    const torrents = [];
-
-    for (let p = page; p < page + 10; p++) {
-        const t = await getTorrents(p);
-        torrents.push(...t);
+// Catalog
+builder.defineCatalogHandler(async ({ type, id }) => {
+    let allTorrents = [];
+    for (let page = 1; page <= 10; page++) {
+        const torrents = await fetchTorrents(page);
+        allTorrents = allTorrents.concat(torrents);
     }
-
-    return {
-        metas: torrents,
-        cacheMaxAge: 3600
-    };
+    // Ordenamos por fecha descendente
+    allTorrents.sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Retornamos en el formato Stremio
+    return { metas: allTorrents.map(t => ({
+        id: t.id,
+        name: t.title,
+        type: type,
+        description: t.description,
+        genres: t.genres,
+        releaseInfo: t.release,
+        poster: t.poster
+    }))};
 });
 
-// --- STREAMS ---
-builder.defineStreamHandler(async (args) => {
-    const torrents = await getTorrents(1); // buscar en la primera página
-    const stream = torrents.find(t => t.infoHash === args.id);
-    if (stream) {
-        return [{ title: stream.name, url: stream.torrent, infoHash: stream.infoHash }];
+// Meta handler
+builder.defineMetaHandler(async ({ type, id }) => {
+    // Buscar el torrent exacto
+    for (let page = 1; page <= 10; page++) {
+        const torrents = await fetchTorrents(page);
+        const torrent = torrents.find(t => t.id === id);
+        if (torrent) {
+            return {
+                id: torrent.id,
+                name: torrent.title,
+                type: type,
+                description: torrent.description,
+                genres: torrent.genres,
+                releaseInfo: torrent.release,
+                poster: torrent.poster,
+                streams: torrent.files.map(f => ({
+                    title: f.name,
+                    url: f.magnet,
+                    infoHash: f.infoHash
+                }))
+            };
+        }
     }
-    return [];
+    return null;
 });
 
-// --- EXPRESS ---
-app.use('/manifest.json', (req, res) => res.json(builder.getManifest()));
-app.use(builder.getRouter());
-
-const PORT = process.env.PORT || 7000;
-app.listen(PORT, () => console.log(`🚀 Addon corriendo en puerto ${PORT}`));
+// Exponemos el addon
+module.exports = builder.getInterface();
