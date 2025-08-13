@@ -1,7 +1,6 @@
 const { addonBuilder } = require("stremio-addon-sdk");
-const axios = require("axios");
 
-// Leer variables de entorno desde Render
+// Leer variables de entorno
 const USER = process.env.GAY_TORRENTS_USER;
 const PASS = process.env.GAY_TORRENTS_PASS;
 
@@ -13,46 +12,57 @@ if (!USER || !PASS) {
 console.log("Usuario (Render):", USER);
 console.log("Contraseña (Render):", PASS);
 
-// Definir el manifest con catalogs como array válido
+// Crear manifest
 const manifest = {
     id: "org.gaytorrents.addon",
     version: "1.0.0",
-    name: "Gay Torrents Private Addon",
-    description: "Addon privado para acceder a Gay Torrents con usuario y contraseña",
+    name: "Gay Torrents Addon",
+    description: "Addon para Stremio con contenido de Gay Torrents",
     resources: ["catalog", "stream"],
     types: ["movie", "series"],
-    idPrefixes: ["gt_"],
     catalogs: [
         {
             type: "movie",
-            id: "gaytorrents-movies",
+            id: "gaytorrents_catalog",
             name: "Gay Torrents Movies"
-        },
-        {
-            type: "series",
-            id: "gaytorrents-series",
-            name: "Gay Torrents Series"
         }
     ]
 };
 
+// Crear addon
 const builder = new addonBuilder(manifest);
 
-// Handler de catálogo (ejemplo básico)
-builder.defineCatalogHandler(({ type, id }) => {
-    console.log(`Solicitud de catálogo: tipo=${type}, id=${id}`);
-
-    // Ejemplo: respuesta vacía (puedes rellenar con datos reales)
-    return Promise.resolve({ metas: [] });
+// Catálogo básico de prueba
+builder.defineCatalogHandler(() => {
+    return Promise.resolve({
+        metas: [
+            {
+                id: "movie1",
+                type: "movie",
+                name: "Película de prueba Gay Torrents",
+                poster: "https://placehold.co/300x450"
+            }
+        ]
+    });
 });
 
-// Handler de stream (ejemplo básico)
-builder.defineStreamHandler(({ type, id }) => {
-    console.log(`Solicitud de stream: tipo=${type}, id=${id}`);
-
-    // Ejemplo: sin streams (debes implementar la lógica real si quieres mostrar torrents)
-    return Promise.resolve({ streams: [] });
+// Streams de prueba
+builder.defineStreamHandler(() => {
+    return Promise.resolve({
+        streams: [
+            {
+                title: "Stream de prueba",
+                url: "https://www.example.com/video.mp4"
+            }
+        ]
+    });
 });
 
-// Exportar el addon
-module.exports = builder.getInterface();
+// Servidor HTTP para mantenerlo activo en Render
+require("http")
+    .createServer((req, res) => {
+        builder.getInterface()(req, res);
+    })
+    .listen(process.env.PORT || 7000);
+
+console.log(`Servidor del addon escuchando en el puerto ${process.env.PORT || 7000}`);
